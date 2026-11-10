@@ -861,6 +861,109 @@ function parseCSV(text){
   if(cell.length>0||row.length>0){row.push(cell);rows.push(row);}
   return rows;
 }
+var LBASE=[3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
+var LEXT=[0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
+var DBASE=[1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
+var DEXT=[0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+var CLORDER=[16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15];
+function huffTable(lengths){
+  var count=new Uint16Array(16),i,len;
+  for(i=0;i<lengths.length;i++)if(lengths[i]>0)count[lengths[i]]++;
+  count[0]=0;
+  var left=1;
+  for(len=1;len<=15;len++){left=(left<<1)-count[len];if(left<0)throw new Error('xlsx 压缩表损坏');}
+  var offs=new Uint16Array(16),off=0;
+  for(len=1;len<=15;len++){offs[len]=off;off+=count[len];}
+  var symbol=new Uint16Array(lengths.length);
+  for(i=0;i<lengths.length;i++)if(lengths[i]>0)symbol[offs[lengths[i]]++]=i;
+  return {count:count,symbol:symbol};
+}
+var FIXL=null,FIXD=null;
+function fixTables(){
+  if(FIXL)return;
+  var l=new Uint8Array(288),d=new Uint8Array(30),i;
+  for(i=0;i<144;i++)l[i]=8;
+  for(;i<256;i++)l[i]=9;
+  for(;i<280;i++)l[i]=7;
+  for(;i<288;i++)l[i]=8;
+  for(i=0;i<30;i++)d[i]=5;
+  FIXL=huffTable(l);FIXD=huffTable(d);
+}
+function inflateRaw(src){
+  var pos=0,bitbuf=0,bitcnt=0,out=new Uint8Array(Math.max(1024,src.length*4)),outLen=0;
+  function grow(n){
+    if(outLen+n<=out.length)return;
+    var cap=out.length;while(cap<outLen+n)cap*=2;
+    var next=new Uint8Array(cap);next.set(out.subarray(0,outLen));out=next;
+  }
+  function bits(n){
+    while(bitcnt<n){
+      if(pos>=src.length)throw new Error('xlsx 压缩数据不完整');
+      bitbuf+=src[pos++]*Math.pow(2,bitcnt);bitcnt+=8;
+    }
+    var mask=Math.pow(2,n),v=bitbuf%mask;
+    bitbuf=Math.floor(bitbuf/mask);bitcnt-=n;
+    return v;
+  }
+  function decode(h){
+    var code=0,first=0,index=0,len,cnt;
+    for(len=1;len<=15;len++){
+      code|=bits(1);cnt=h.count[len];
+      if(code-cnt<first)return h.symbol[index+(code-first)];
+      index+=cnt;first+=cnt;first<<=1;code<<=1;
+    }
+    throw new Error('xlsx 压缩编码损坏');
+  }
+  function dynamicTables(){
+    var hlit=bits(5)+257,hdist=bits(5)+1,hclen=bits(4)+4,i;
+    var clens=new Uint8Array(19);
+    for(i=0;i<hclen;i++)clens[CLORDER[i]]=bits(3);
+    var clh=huffTable(clens),lengths=new Uint8Array(hlit+hdist),n=0;
+    while(n<lengths.length){
+      var sym=decode(clh),rep=0,val=0;
+      if(sym<16)lengths[n++]=sym;
+      else if(sym===16){
+        if(n===0)throw new Error('xlsx 压缩表损坏');
+        val=lengths[n-1];rep=3+bits(2);
+        while(rep-- >0)lengths[n++]=val;
+      }else if(sym===17){rep=3+bits(3);while(rep-- >0)lengths[n++]=0;}
+      else{rep=11+bits(7);while(rep-- >0)lengths[n++]=0;}
+    }
+    return [huffTable(lengths.subarray(0,hlit)),huffTable(lengths.subarray(hlit))];
+  }
+  fixTables();
+  var last=0;
+  do{
+    last=bits(1);var type=bits(2);
+    if(type===0){
+      bitbuf=0;bitcnt=0;
+      if(pos+4>src.length)throw new Error('xlsx 压缩数据不完整');
+      var len=src[pos]|(src[pos+1]<<8);pos+=4;
+      if(pos+len>src.length)throw new Error('xlsx 压缩数据不完整');
+      grow(len);out.set(src.subarray(pos,pos+len),outLen);outLen+=len;pos+=len;
+    }else if(type===1||type===2){
+      var lh=FIXL,dh=FIXD;
+      if(type===2){var t=dynamicTables();lh=t[0];dh=t[1];}
+      while(true){
+        var sym=decode(lh);
+        if(sym<256){grow(1);out[outLen++]=sym;}
+        else if(sym===256)break;
+        else{
+          sym-=257;
+          if(sym>=29)throw new Error('xlsx 压缩编码损坏');
+          var length=LBASE[sym]+bits(LEXT[sym]);
+          var dsym=decode(dh);
+          if(dsym>=30)throw new Error('xlsx 压缩编码损坏');
+          var dist=DBASE[dsym]+bits(DEXT[dsym]);
+          if(dist>outLen)throw new Error('xlsx 压缩编码损坏');
+          grow(length);
+          for(var k=0;k<length;k++){out[outLen]=out[outLen-dist];outLen++;}
+        }
+      }
+    }else throw new Error('xlsx 压缩块类型错误');
+  }while(!last);
+  return out.subarray(0,outLen);
+}
 function zipEntries(buf){
   var u8=new Uint8Array(buf),dv=new DataView(buf),eocd=-1;
   var min=Math.max(0,u8.length-65557);
@@ -884,11 +987,7 @@ async function zipRead(z,e){
   var data=z.u8.subarray(start,start+e.csize);
   if(e.method===0)return new TextDecoder('utf-8').decode(data);
   if(e.method!==8)throw new Error('不支持的压缩格式');
-  if(typeof DecompressionStream==='undefined')throw new Error('NOSUPPORT');
-  var ds;
-  try{ds=new DecompressionStream('deflate-raw');}catch(err){throw new Error('NOSUPPORT');}
-  var out=await new Response(new Blob([data]).stream().pipeThrough(ds)).arrayBuffer();
-  return new TextDecoder('utf-8').decode(out);
+  return new TextDecoder('utf-8').decode(inflateRaw(data));
 }
 function parseSharedXml(xml){
   var doc=new DOMParser().parseFromString(xml,'application/xml');
@@ -1239,8 +1338,7 @@ $('wxFile').addEventListener('change',function(e){
       openImport(rows);
     }catch(err){
       var msg=String(err&&err.message||'');
-      if(msg==='NOSUPPORT')toast('当前浏览器不支持解析 xlsx，请把文件另存为 CSV 后再导入');
-      else toast('文件解析失败：'+(msg||'格式不符，请确认是微信账单'));
+      toast('文件解析失败：'+(msg||'格式不符，请确认是微信账单'));
     }
   };
   fr.onerror=function(){toast('文件读取失败');};
