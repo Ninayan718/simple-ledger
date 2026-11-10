@@ -292,7 +292,7 @@ button{cursor:pointer; touch-action:manipulation}
 
   <footer class="tips">
     <div><b>渠道之间互转不用记</b>（钱没进也没出，记了会虚增收支）；微信账单里的提现/还款会标成「不计收支」。</div>
-    <div>右上角 ··· 可导入微信账单 CSV、导出 CSV / JSON 备份；<b>记得定期备份</b>，清浏览器数据会丢。</div>
+    <div>右上角 ··· 可导入微信账单 Excel（.xlsx）或 CSV、导出 CSV / JSON 备份；<b>记得定期备份</b>，清浏览器数据会丢。</div>
     <div>iPhone：Safari 分享 → 添加到主屏幕，就能当 App 用。</div>
   </footer>
 </div>
@@ -359,7 +359,7 @@ button{cursor:pointer; touch-action:manipulation}
 </div>
 <div class="menu hidden" id="menu">
   <button data-act="channels">管理渠道 / 账户</button>
-  <button data-act="wx">导入微信账单 CSV</button>
+  <button data-act="wx">导入微信账单（xlsx）</button>
   <button data-act="csv">导出 CSV（全部记录）</button>
   <button data-act="json">导出 JSON 备份</button>
   <button data-act="import">导入 JSON（合并去重）</button>
@@ -368,7 +368,7 @@ button{cursor:pointer; touch-action:manipulation}
   <button data-act="wipe" class="warn">清空全部数据</button>
 </div>
 <input type="file" id="importFile" accept=".json,application/json" hidden>
-<input type="file" id="wxFile" accept=".csv,text/csv" hidden>
+<input type="file" id="wxFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -861,7 +861,93 @@ function parseCSV(text){
   if(cell.length>0||row.length>0){row.push(cell);rows.push(row);}
   return rows;
 }
+function zipEntries(buf){
+  var u8=new Uint8Array(buf),dv=new DataView(buf),eocd=-1;
+  var min=Math.max(0,u8.length-65557);
+  for(var i=u8.length-22;i>=min;i--){if(dv.getUint32(i,true)===0x06054b50){eocd=i;break;}}
+  if(eocd<0)throw new Error('文件不是有效的 xlsx');
+  var count=dv.getUint16(eocd+10,true),off=dv.getUint32(eocd+16,true),list=[],q=off;
+  for(var n=0;n<count;n++){
+    if(q+46>u8.length||dv.getUint32(q,true)!==0x02014b50)break;
+    var nameLen=dv.getUint16(q+28,true),extraLen=dv.getUint16(q+30,true),cmtLen=dv.getUint16(q+32,true);
+    var name=new TextDecoder('utf-8').decode(u8.subarray(q+46,q+46+nameLen));
+    list.push({name:name,method:dv.getUint16(q+10,true),csize:dv.getUint32(q+20,true),
+      loff:dv.getUint32(q+42,true)});
+    q+=46+nameLen+extraLen+cmtLen;
+  }
+  return {u8:u8,dv:dv,list:list};
+}
+async function zipRead(z,e){
+  var dv=z.dv,off=e.loff;
+  if(dv.getUint32(off,true)!==0x04034b50)throw new Error('xlsx 内部结构损坏');
+  var start=off+30+dv.getUint16(off+26,true)+dv.getUint16(off+28,true);
+  var data=z.u8.subarray(start,start+e.csize);
+  if(e.method===0)return new TextDecoder('utf-8').decode(data);
+  if(e.method!==8)throw new Error('不支持的压缩格式');
+  if(typeof DecompressionStream==='undefined')throw new Error('NOSUPPORT');
+  var ds;
+  try{ds=new DecompressionStream('deflate-raw');}catch(err){throw new Error('NOSUPPORT');}
+  var out=await new Response(new Blob([data]).stream().pipeThrough(ds)).arrayBuffer();
+  return new TextDecoder('utf-8').decode(out);
+}
+function parseSharedXml(xml){
+  var doc=new DOMParser().parseFromString(xml,'application/xml');
+  var sis=doc.getElementsByTagNameNS('*','si'),out=[];
+  for(var i=0;i<sis.length;i++){
+    var ts=sis[i].getElementsByTagNameNS('*','t'),v='';
+    for(var j=0;j<ts.length;j++)v+=ts[j].textContent;
+    out.push(v);
+  }
+  return out;
+}
+function parseSheetXml(xml,shared){
+  var doc=new DOMParser().parseFromString(xml,'application/xml');
+  var rowEls=doc.getElementsByTagNameNS('*','row'),rows=[];
+  for(var i=0;i<rowEls.length;i++){
+    var cells=rowEls[i].getElementsByTagNameNS('*','c'),row=[];
+    for(var j=0;j<cells.length;j++){
+      var c=cells[j],ref=c.getAttribute('r')||'',col=j,m=/^([A-Z]+)/.exec(ref);
+      if(m){col=0;for(var q=0;q<m[1].length;q++)col=col*26+(m[1].charCodeAt(q)-64);col--;}
+      var t=c.getAttribute('t'),v='';
+      if(t==='inlineStr'){
+        var is=c.getElementsByTagNameNS('*','is')[0];
+        if(is){var its=is.getElementsByTagNameNS('*','t');for(var k=0;k<its.length;k++)v+=its[k].textContent;}
+      }else{
+        var ve=c.getElementsByTagNameNS('*','v')[0];
+        v=ve?ve.textContent:'';
+        if(t==='s'&&v!==''){var si=shared[Number(v)];v=si==null?'':si;}
+      }
+      while(row.length<col)row.push('');
+      row[col]=String(v);
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+async function parseXlsx(buf){
+  var z=zipEntries(buf),shared=[],sheet=null;
+  for(var i=0;i<z.list.length;i++){
+    var nm=z.list[i].name;
+    if(nm==='xl/sharedStrings.xml')shared=parseSharedXml(await zipRead(z,z.list[i]));
+    if(/^xl\/worksheets\/sheet\d+\.xml$/.test(nm)&&!sheet)sheet=z.list[i];
+  }
+  if(!sheet)throw new Error('xlsx 里找不到工作表');
+  return parseSheetXml(await zipRead(z,sheet),shared);
+}
 function normHead(s){return String(s==null?'':s).replace(/[\s\u00a0]/g,'').replace(/（/g,'(').replace(/）/g,')');}
+function wxDate(v){
+  var s=String(v==null?'':v).trim();
+  if(/^\d+(\.\d+)?$/.test(s)){
+    var n=Number(s);
+    if(n>20000&&n<80000){
+      var d=new Date(Math.round((n-25569)*86400000));
+      function p(x){return String(x).padStart(2,'0');}
+      return d.getUTCFullYear()+'-'+p(d.getUTCMonth()+1)+'-'+p(d.getUTCDate())+' '+
+        p(d.getUTCHours())+':'+p(d.getUTCMinutes())+':'+p(d.getUTCSeconds());
+    }
+  }
+  return s;
+}
 function mapWx(rows){
   var hi=-1;
   for(var i=0;i<Math.min(rows.length,50);i++){
@@ -882,7 +968,7 @@ function mapWx(rows){
   var seen={},out=[];
   for(var k=hi+1;k<rows.length;k++){
     var row=rows[k];if(!row||!row.length)continue;
-    var ds=cell(row,ci.time).slice(0,10);
+    var ds=wxDate(cell(row,ci.time)).slice(0,10);
     if(!/^\d{4}-\d{2}-\d{2}$/.test(ds))continue;
     var c=toCents(cell(row,ci.amt));if(isNaN(c))continue;
     var d=cell(row,ci.dir);
@@ -1143,10 +1229,19 @@ $('wxFile').addEventListener('change',function(e){
   var f=e.target.files[0];e.target.value='';
   if(!f)return;
   var fr=new FileReader();
-  fr.onload=function(){
-    var rows=mapWx(parseCSV(decodeCSV(fr.result)));
-    if(!rows){toast('没找到微信账单表头，请确认是微信「用于个人对账」导出的 CSV');return;}
-    openImport(rows);
+  fr.onload=async function(){
+    try{
+      var buf=fr.result,u8=new Uint8Array(buf);
+      var isZip=u8.length>4&&u8[0]===0x50&&u8[1]===0x4b;
+      var rows=isZip||/\.xlsx$/i.test(f.name)?
+        mapWx(await parseXlsx(buf)):mapWx(parseCSV(decodeCSV(buf)));
+      if(!rows){toast('没找到微信账单表头，请确认文件里有「交易时间 / 收/支 / 金额」这一行');return;}
+      openImport(rows);
+    }catch(err){
+      var msg=String(err&&err.message||'');
+      if(msg==='NOSUPPORT')toast('当前浏览器不支持解析 xlsx，请把文件另存为 CSV 后再导入');
+      else toast('文件解析失败：'+(msg||'格式不符，请确认是微信账单'));
+    }
   };
   fr.onerror=function(){toast('文件读取失败');};
   fr.readAsArrayBuffer(f);
