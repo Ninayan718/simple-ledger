@@ -193,6 +193,25 @@ button{cursor:pointer; touch-action:manipulation}
 
 .toast{position:fixed;z-index:30;left:50%;bottom:calc(26px + env(safe-area-inset-bottom));transform:translate(-50%,12px);background:#1f2430;color:#fff;font-size:13px;padding:10px 16px;border-radius:9px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:86vw;text-align:center}
 .toast.show{opacity:1;transform:translate(-50%,0)}
+.ch-scope-tabs{display:flex;gap:8px;margin-bottom:10px}
+.ch-scope-tabs button{flex:1;border:0.5px solid var(--bd2);background:var(--card);border-radius:8px;padding:7px 4px;font-size:13px;color:var(--t2)}
+.ch-scope-tabs button.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.ch-note{font-size:12px;color:var(--t3);line-height:1.6;margin:0 0 12px}
+.ch-manage-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:0.5px solid var(--bd)}
+.ch-manage-row .nm{flex:1;min-width:0;display:flex;align-items:center;gap:8px;font-size:13px}
+.ch-manage-row .nm .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-manage-row .ops{display:flex;gap:4px;flex:none}
+.ch-manage-row .ops button{border:0.5px solid var(--bd2);background:var(--card);color:var(--t2);border-radius:6px;min-width:27px;height:27px;font-size:12px;padding:0 5px}
+.ch-manage-row .ops button.del{color:var(--exp);border-color:#f3c6c6}
+.ch-manage-row .ops button:disabled{opacity:.3}
+.ch-editor-box{border:0.5px solid var(--bd);background:var(--bg);border-radius:10px;padding:12px;margin:12px 0}
+.ch-editor-box input[type=text]{width:100%;border:0.5px solid var(--bd);background:var(--card);border-radius:8px;padding:9px 11px;font-size:14px;outline:none}
+.ch-colors{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.ch-colors button{width:26px;height:26px;border-radius:50%;border:2px solid transparent;padding:0}
+.ch-colors button.on{border-color:var(--t1)}
+.ch-del-box{border:0.5px solid #f3c6c6;background:#fff7f7;border-radius:10px;padding:12px;margin:12px 0;font-size:13px;line-height:1.7}
+.ch-del-box select{width:100%;border:0.5px solid var(--bd2);background:var(--card);border-radius:8px;padding:8px;margin:8px 0}
+.modebar .mini-btn{flex:none}
 @media (min-width:560px){ .sheet{bottom:auto;top:50%;transform:translateY(-46%) scale(.98);border-radius:16px;opacity:0;pointer-events:none;max-height:86vh} .sheet.open{transform:translateY(-50%) scale(1);opacity:1;pointer-events:auto} .imp-sheet{bottom:auto;top:50%;transform:translateY(-46%) scale(.98);border-radius:16px;opacity:0;pointer-events:none} .imp-sheet.open{transform:translateY(-50%) scale(1);opacity:1;pointer-events:auto} }
 </style>
 </head>
@@ -232,7 +251,10 @@ button{cursor:pointer; touch-action:manipulation}
       <button data-mode="single" class="on">逐笔</button>
       <button data-mode="daily">日结</button>
     </div>
-    <span class="hint" id="modeHint">点渠道记一笔</span>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="hint" id="modeHint">点渠道记一笔</span>
+      <button class="mini-btn" id="manageChannels">管理渠道</button>
+    </div>
   </div>
 
   <section class="ch-list" id="channelPanel"></section>
@@ -251,7 +273,7 @@ button{cursor:pointer; touch-action:manipulation}
     <div class="card asset-card">
       <div class="section-head"><h2>记一次余额快照</h2><span>沿用上次数字，只改有变化的</span></div>
       <div class="asset-date"><label>日期 <input type="date" id="snapDate"></label></div>
-      <h3 class="asset-h3">账户余额</h3>
+      <h3 class="asset-h3">账户余额 <button class="mini-btn" id="manageAssets">管理账户</button></h3>
       <div id="snapAccounts"></div>
       <h3 class="asset-h3">信用卡欠款 <button class="mini-btn" id="addCard">＋ 添加信用卡</button></h3>
       <div id="snapCards"></div>
@@ -306,7 +328,37 @@ button{cursor:pointer; touch-action:manipulation}
   </div>
 </div>
 
+<div class="overlay hidden" id="chOverlay"></div>
+<div class="sheet hidden" id="chSheet" role="dialog" aria-label="管理渠道">
+  <div class="sheet-head"><strong>管理渠道</strong><button id="closeCh" aria-label="关闭">✕</button></div>
+  <div class="ch-scope-tabs" id="chScopeTabs">
+    <button data-scope="expense" class="on">支出渠道</button>
+    <button data-scope="income">收入渠道</button>
+    <button data-scope="asset">资产账户</button>
+  </div>
+  <p class="ch-note">三处清单各自独立，改这里只影响当前这一处。删除时会把已有数据转移到你指定的渠道，不会丢。</p>
+  <div id="chList"></div>
+  <div class="ch-editor-box hidden" id="chEditor">
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px" id="chEditorTitle">添加渠道</div>
+    <input type="text" id="chName" placeholder="名称，如：交行、现金" maxlength="12" autocomplete="off">
+    <div class="ch-colors" id="chColors"></div>
+    <div class="sheet-actions" style="margin-top:6px">
+      <button class="danger" id="chCancel">取消</button>
+      <button class="primary" id="chSave">保存</button>
+    </div>
+  </div>
+  <div class="ch-del-box hidden" id="chDelete">
+    <div id="chDelInfo"></div>
+    <select id="chDelTarget"></select>
+    <div class="sheet-actions" style="margin-top:6px">
+      <button class="danger" id="chDelCancel">取消</button>
+      <button class="primary" id="chDelConfirm">确认删除并转移</button>
+    </div>
+  </div>
+  <button class="primary" id="chAdd">＋ 添加渠道</button>
+</div>
 <div class="menu hidden" id="menu">
+  <button data-act="channels">管理渠道 / 账户</button>
   <button data-act="wx">导入微信账单 CSV</button>
   <button data-act="csv">导出 CSV（全部记录）</button>
   <button data-act="json">导出 JSON 备份</button>
@@ -323,7 +375,7 @@ button{cursor:pointer; touch-action:manipulation}
 (function(){
 'use strict';
 var KEY='ledger.v1', TAGKEY='ledger.incomeTags.v1', SNAPKEY='ledger.snapshots.v1';
-var CHANNELS=[
+var DEF_CHANNELS=[
   {key:'alipay',name:'支付宝',color:'#1677ff'},
   {key:'wechat',name:'微信',color:'#07b657'},
   {key:'cmb',name:'招行',color:'#e03131'},
@@ -331,6 +383,37 @@ var CHANNELS=[
   {key:'abc',name:'农行',color:'#0f9d58'},
   {key:'citic',name:'中信',color:'#e8890c'}
 ];
+var SCOPES=['expense','income','asset'];
+var CH_COLORS=['#1677ff','#07b657','#e03131','#3b5bdb','#0f9d58','#e8890c','#7048e8','#0c8599','#868e96','#d6336c'];
+var CHKEY='ledger.channelSets.v1';
+var channelSets={expense:[],income:[],asset:[]};
+function cloneDef(){return DEF_CHANNELS.map(function(c){return {key:c.key,name:c.name,color:c.color};});}
+function loadChannelSets(){
+  var d=null;
+  try{var raw=localStorage.getItem(CHKEY);d=raw?JSON.parse(raw):null;}catch(e){}
+  var needSave=!d||!SCOPES.every(function(sc){return Array.isArray(d[sc])&&d[sc].length;});
+  SCOPES.forEach(function(s){
+    var arr=d&&Array.isArray(d[s])?d[s]:null,seen={};
+    channelSets[s]=(arr||[]).filter(function(c){return c&&c.key&&c.name;}).map(function(c){
+      return {key:String(c.key).slice(0,40),name:String(c.name).slice(0,20),
+        color:(typeof c.color==='string'&&/^#[0-9a-fA-F]{6}$/.test(c.color))?c.color:'#868e96'};
+    }).filter(function(c){if(seen[c.key])return false;seen[c.key]=1;return true;});
+    if(!channelSets[s].length)channelSets[s]=cloneDef();
+  });
+  if(needSave)saveChannelSets();
+}
+function saveChannelSets(){try{localStorage.setItem(CHKEY,JSON.stringify(channelSets));}catch(e){}}
+function channelsFor(scope){return channelSets[scope]||channelSets.expense;}
+function allChannels(){
+  var out=[],seen={};
+  SCOPES.forEach(function(s){channelsFor(s).forEach(function(c){if(!seen[c.key]){seen[c.key]=1;out.push(c);}});});
+  return out;
+}
+function defaultWxChannel(){
+  var l=channelsFor('expense');
+  for(var i=0;i<l.length;i++)if(l[i].key==='wechat')return 'wechat';
+  return l[0]?l[0].key:'wechat';
+}
 var TAGS=[
   {key:'food',name:'吃'},{key:'transport',name:'行'},
   {key:'shopping',name:'购'},{key:'home',name:'住'},{key:'other',name:'其他'}
@@ -352,7 +435,12 @@ function fmt(c){c=Math.round(c);var neg=c<0,a=Math.abs(c),v=a/100;var s=v.toLoca
 function cents(r){return Math.round(Number(r.amount)*100);}
 function toCents(s){var t=String(s==null?'':s).trim().replace(/,/g,'').replace(/[^\d.]/g,'');if(!t)return NaN;var n=Number(t);if(!isFinite(n)||n<=0)return NaN;return Math.round(n*100);}
 function money0(s){var t=String(s==null?'':s).trim().replace(/,/g,'').replace(/[^\d.]/g,'');if(!t)return 0;var n=Number(t);if(!isFinite(n)||n<0)return 0;return Math.round(n*100);}
-function ch(k){for(var i=0;i<CHANNELS.length;i++)if(CHANNELS[i].key===k)return CHANNELS[i];return null;}
+function ch(k,scope){
+  var list=scope?channelsFor(scope):allChannels();
+  for(var i=0;i<list.length;i++)if(list[i].key===k)return list[i];
+  if(scope){var all=allChannels();for(var j=0;j<all.length;j++)if(all[j].key===k)return all[j];}
+  return {key:k,name:'已移除渠道',color:'#9aa1ad'};
+}
 function tag(k){var all=TAGS.concat(incomeTags);for(var i=0;i<all.length;i++)if(all[i].key===k)return all[i];return null;}
 function typeName(t){return t==='expense'?'支出':t==='income'?'收入':'不计收支';}
 function customTags(){return incomeTags.filter(function(t){return !DEF_ITAGS.some(function(d){return d.key===t.key;});});}
@@ -360,7 +448,7 @@ function normalize(r){
   if(!r||typeof r!=='object')return null;
   var date=(typeof r.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(r.date))?r.date:null;
   var type=(r.type==='income'||r.type==='expense'||r.type==='neutral')?r.type:null;
-  var channel=ch(r.channel)?r.channel:null;
+  var channel=(typeof r.channel==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(r.channel))?r.channel:null;
   var amount=Number(r.amount);
   if(!date||!type||!channel||!isFinite(amount)||amount<=0)return null;
   var rid=(typeof r.id==='string'?r.id.replace(/[^A-Za-z0-9_-]/g,'').slice(0,64):'');
@@ -407,7 +495,7 @@ function loadSnaps(){
   }catch(e){snapshots=[];}
 }
 function saveSnaps(){try{localStorage.setItem(SNAPKEY,JSON.stringify(snapshots));}catch(e){}}
-loadTags();loadSnaps();load();
+loadTags();loadSnaps();loadChannelSets();load();
 
 var state={month:thisMonth(),type:'expense',mode:'single',editing:null,showNeutral:false,
   form:{type:'expense',channel:'alipay',tag:null,date:today()},
@@ -440,7 +528,7 @@ function demoData(){
 }
 function demoSnap(){
   var vals=[2340,860,15600,4200,3100,7800],a={};
-  CHANNELS.forEach(function(c,i){a[c.key]=vals[i]*100;});
+  DEF_CHANNELS.forEach(function(c,i){a[c.key]=vals[i]*100;});
   return {id:'demo-snap',date:today(),accounts:a,cards:[{id:'demo-card',name:'中信信用卡',owe:236000}]};
 }
 
@@ -487,17 +575,24 @@ function render(){
 
   var dir=mr.filter(function(r){return r.type===state.type;});
   var dirTotal=sum(dir),html='';
-  CHANNELS.forEach(function(c){
+  channelsFor(state.type).forEach(function(c){
     var list=dir.filter(function(r){return r.channel===c.key;});
     var s=sum(list),pct=dirTotal>0?Math.min(100,s/dirTotal*100):0;
     html+='<button class="ch-row" data-ch="'+c.key+'">'+
       '<span class="dot" style="background:'+c.color+'"></span>'+
-      '<span class="ch-name">'+c.name+'</span>'+
+      '<span class="ch-name">'+esc(c.name)+'</span>'+
       '<span class="ch-meta"><span class="ch-amount '+(state.type==='expense'?'exp':'inc')+'">'+fmt(s)+'</span>'+
       '<span class="ch-count">'+list.length+' 笔</span></span>'+
       '<span class="ch-plus">＋</span>'+
       '<span class="bar"><i style="width:'+pct.toFixed(1)+'%;background:'+c.color+'"></i></span></button>';
   });
+  var known={};channelsFor(state.type).forEach(function(c){known[c.key]=1;});
+  var orphan=dir.filter(function(r){return !known[r.channel];});
+  if(orphan.length){
+    html+='<div class="ch-row" style="opacity:.72"><span class="dot" style="background:#9aa1ad"></span>'+
+      '<span class="ch-name">已移除渠道</span><span class="ch-meta"><span class="ch-amount">'+fmt(sum(orphan))+'</span>'+
+      '<span class="ch-count">'+orphan.length+' 笔</span></span></div>';
+  }
   $('channelPanel').innerHTML=html;
   if(!single)renderDaily();
   renderTags(dir,dirTotal);
@@ -510,7 +605,13 @@ function sortedSnaps(){
   }).map(function(x){return x.s;});
 }
 function latestSnap(){return sortedSnaps()[0]||null;}
-function accTotal(s){if(!s)return 0;var t=0;CHANNELS.forEach(function(c){t+=Number(s.accounts&&s.accounts[c.key])||0;});return t;}
+function accTotal(s){
+  if(!s)return 0;
+  var t=0,used={},acc=s.accounts||{};
+  channelsFor('asset').forEach(function(c){used[c.key]=1;t+=Number(acc[c.key])||0;});
+  Object.keys(acc).forEach(function(k){if(!used[k])t+=Number(acc[k])||0;});
+  return t;
+}
 function oweTotal(s){if(!s)return 0;var t=0;(s.cards||[]).forEach(function(c){t+=Number(c.owe)||0;});return t;}
 function netOf(s){return accTotal(s)-oweTotal(s);}
 function amtStr(c){return c?(Number(c)/100).toFixed(2).replace(/\.00$/,''):'';}
@@ -518,14 +619,14 @@ function renderAssets(){
   var last=latestSnap();
   if(!state.draftAccounts){
     state.draftAccounts={};
-    CHANNELS.forEach(function(c){state.draftAccounts[c.key]=amtStr(last&&last.accounts&&last.accounts[c.key]);});
+    channelsFor('asset').forEach(function(c){state.draftAccounts[c.key]=amtStr(last&&last.accounts&&last.accounts[c.key]);});
   }
   if(!state.draftCards){
     state.draftCards=last&&last.cards?last.cards.map(function(c){return {id:c.id,name:c.name,owe:amtStr(c.owe)};}):[];
   }
   if(!$('snapDate').value)$('snapDate').value=today();
-  $('snapAccounts').innerHTML=CHANNELS.map(function(c){
-    return '<div class="asset-row"><span class="nm"><span class="dot" style="background:'+c.color+'"></span>'+c.name+'</span>'+
+  $('snapAccounts').innerHTML=channelsFor('asset').map(function(c){
+    return '<div class="asset-row"><span class="nm"><span class="dot" style="background:'+c.color+'"></span>'+esc(c.name)+'</span>'+
       '<input type="text" inputmode="decimal" placeholder="0" data-acc="'+c.key+'" value="'+esc(state.draftAccounts[c.key])+'" autocomplete="off"></div>';
   }).join('');
   $('snapCards').innerHTML=state.draftCards.length?state.draftCards.map(function(c,i){
@@ -547,7 +648,7 @@ function renderAssets(){
 }
 function collectAssetInputs(){
   var acc={};
-  CHANNELS.forEach(function(c){
+  channelsFor('asset').forEach(function(c){
     var el=$('snapAccounts').querySelector('[data-acc="'+c.key+'"]');
     if(el)state.draftAccounts[c.key]=el.value;
     acc[c.key]=money0(state.draftAccounts[c.key]);
@@ -571,9 +672,9 @@ function renderDaily(){
   var dt=$('dailyDate').value||today(),h='';
   [['expense','支出'],['income','收入']].forEach(function(pair){
     h+='<div class="daily-group"><h3 class="'+(pair[0]==='expense'?'exp':'inc')+'">'+pair[1]+'</h3>';
-    CHANNELS.forEach(function(c){
+    channelsFor(pair[0]).forEach(function(c){
       var ex=sum(records.filter(function(r){return r.date===dt&&r.type===pair[0]&&r.channel===c.key;}));
-      h+='<div class="daily-row"><span class="nm"><span class="dot" style="background:'+c.color+'"></span>'+c.name+
+      h+='<div class="daily-row"><span class="nm"><span class="dot" style="background:'+c.color+'"></span>'+esc(c.name)+
         '<span class="prev">已记 '+fmt(ex)+'</span></span>'+
         '<input type="text" inputmode="decimal" placeholder="合计" data-dtype="'+pair[0]+'" data-dch="'+c.key+'" autocomplete="off"></div>';
     });
@@ -614,11 +715,11 @@ function renderDetails(dir,neutral){
   }
   var sorted=list.slice().sort(function(a,b){return b.date.localeCompare(a.date)||b.createdAt-a.createdAt;});
   $('detailList').innerHTML=sorted.map(function(r){
-    var c=ch(r.channel),t=tag(r.tag),isN=r.type==='neutral';
+    var c=ch(r.channel,r.type==='income'?'income':'expense'),t=tag(r.tag),isN=r.type==='neutral';
     var sub=[t?t.name:'',r.note?esc(r.note):'',r.src==='daily'?DAY_NOTE:'',r.party?esc(r.party):''].filter(Boolean).join(' · ');
     return '<button class="rec'+(isN?' neutral':'')+'" data-id="'+esc(r.id)+'">'+
       '<span class="rec-date">'+r.date.slice(5).replace('-','/')+'</span>'+
-      '<span class="rec-main"><span class="rec-title">'+c.name+(isN?'<span class="neutral-badge">不计收支</span>':'')+'</span>'+
+      '<span class="rec-main"><span class="rec-title">'+esc(c.name)+(isN?'<span class="neutral-badge">不计收支</span>':'')+'</span>'+
       (sub?'<span class="rec-sub">'+sub+'</span>':'')+'</span>'+
       '<span class="rec-amount '+(isN?'':(r.type==='expense'?'exp':'inc'))+'">'+(isN?'':(r.type==='expense'?'-':'+'))+fmt(cents(r))+'</span></button>';
   }).join('');
@@ -628,8 +729,11 @@ function renderForm(){
   var f=state.form;
   $('fType').innerHTML=[['expense','支出'],['income','收入'],['neutral','不计收支']].map(function(p){
     return '<button class="chip'+(f.type===p[0]?' on':'')+'" data-ftype="'+p[0]+'">'+p[1]+'</button>';}).join('');
-  $('fChannel').innerHTML=CHANNELS.map(function(c){
-    return '<button class="chip'+(f.channel===c.key?' on':'')+'" data-fch="'+c.key+'"><span class="cdot" style="background:'+c.color+'"></span>'+c.name+'</button>';}).join('');
+  var fscope=f.type==='income'?'income':'expense';
+  var flist=channelsFor(fscope);
+  if(f.channel&&!flist.some(function(c){return c.key===f.channel;}))flist=flist.concat([ch(f.channel,fscope)]);
+  $('fChannel').innerHTML=flist.map(function(c){
+    return '<button class="chip'+(f.channel===c.key?' on':'')+'" data-fch="'+c.key+'"><span class="cdot" style="background:'+c.color+'"></span>'+esc(c.name)+'</button>';}).join('');
   var pool=f.type==='income'?incomeTags:TAGS;
   $('fTag').innerHTML=pool.map(function(t){
     var del=(f.type==='income'&&t.key.indexOf('inc_u')===0)?'<span class="del" data-deltag="'+t.key+'">×</span>':'';
@@ -659,7 +763,7 @@ function openSheet(opt){
     $('deleteRec').classList.remove('hidden');
   }else{
     f.type=(state.type==='income'||state.type==='expense')?state.type:'expense';
-    f.channel=(opt&&opt.channel)||'alipay';f.tag=null;f.date=today();
+    f.channel=(opt&&opt.channel)||channelsFor(f.type==='income'?'income':'expense')[0].key;f.tag=null;f.date=today();
     $('fAmount').value='';$('fNote').value='';$('fDate').value=f.date;
     $('sheetTitle').textContent='记一笔'+typeName(f.type);
     $('deleteRec').classList.add('hidden');
@@ -704,7 +808,7 @@ function saveDaily(){
     if(isNaN(target)){skipped++;continue;}
     var type=el.dataset.dtype,key=el.dataset.dch;
     var ex=sum(records.filter(function(r){return r.date===dt&&r.type===type&&r.channel===key;}));
-    if(target<ex){tooSmall.push(ch(key).name);continue;}
+    if(target<ex){tooSmall.push(ch(key,type).name);continue;}
     var diff=target-ex;
     if(diff>0){
       records.push(normalize({id:uid(),date:dt,type:type,channel:key,amount:diff/100,tag:null,
@@ -787,7 +891,7 @@ function mapWx(rows){
     var dup=wxid?(!!have[wxid]||!!seen[wxid]):false;
     if(wxid)seen[wxid]=1;
     var note=[cell(row,ci.ttype),cell(row,ci.goods),cell(row,ci.memo)].filter(Boolean).join(' · ').slice(0,120);
-    out.push({date:ds,type:type,amount:c,channel:'wechat',tag:null,note:note,
+    out.push({date:ds,type:type,amount:c,channel:defaultWxChannel(),tag:null,note:note,
       party:cell(row,ci.party).slice(0,80),pay:cell(row,ci.pay).slice(0,60),
       status:cell(row,ci.status).slice(0,40),wxid:wxid,dup:dup,skip:dup,checked:false});
   }
@@ -795,7 +899,7 @@ function mapWx(rows){
 }
 function openImport(rows){
   state.wxRows=rows;
-  $('impBulkChannel').innerHTML=CHANNELS.map(function(c){return '<option value="'+c.key+'">'+c.name+'</option>';}).join('');
+  $('impBulkChannel').innerHTML=allChannels().map(function(c){return '<option value="'+esc(c.key)+'">'+esc(c.name)+'</option>';}).join('');
   renderImport();
   $('impOverlay').classList.remove('hidden');$('impSheet').classList.remove('hidden');
   requestAnimationFrame(function(){$('impSheet').classList.add('open');});
@@ -816,7 +920,10 @@ function renderImport(){
   $('impList').innerHTML=rows.length?rows.map(function(r,idx){
     var tname=typeName(r.type);
     var short=[r.note,r.party].filter(Boolean).join(' · ')||'（无说明）';
-    var opts=CHANNELS.map(function(c){return '<option value="'+c.key+'"'+(r.channel===c.key?' selected':'')+'>'+c.name+'</option>';}).join('');
+    var rscope=r.type==='income'?'income':'expense';
+    var rlist=channelsFor(rscope);
+    if(!rlist.some(function(c){return c.key===r.channel;}))rlist=rlist.concat([ch(r.channel,rscope)]);
+    var opts=rlist.map(function(c){return '<option value="'+esc(c.key)+'"'+(r.channel===c.key?' selected':'')+'>'+esc(c.name)+'</option>';}).join('');
     return '<div class="imp-row'+(r.skip?' dup':'')+'">'+
       '<input class="ck" type="checkbox" data-imck="'+idx+'"'+(r.checked?' checked':'')+(r.skip?' disabled':'')+'>'+
       '<span class="info"><span class="tt">'+esc(short.slice(0,40))+'</span>'+
@@ -854,7 +961,7 @@ function exportCSV(){
   var rows=[['日期','方向','渠道','金额','分类/标签','备注','交易对方','支付方式','状态','交易单号','来源']];
   records.slice().sort(function(a,b){return a.date.localeCompare(b.date);}).forEach(function(r){
     var t=r.tag?tag(r.tag):null;
-    rows.push([r.date,typeName(r.type),ch(r.channel).name,(cents(r)/100).toFixed(2),
+    rows.push([r.date,typeName(r.type),ch(r.channel,r.type==='income'?'income':'expense').name,(cents(r)/100).toFixed(2),
       t?t.name:'',r.note,r.party,r.pay,r.status,r.wxid,
       r.src==='daily'?'日结合计':r.src==='wechat'?'微信导入':'逐笔']);
   });
@@ -864,7 +971,7 @@ function exportCSV(){
 function exportJSON(){
   if(!records.length){toast('还没有记录可导出');return;}
   download('账本备份-'+today()+'.json',JSON.stringify({version:2,exportedAt:new Date().toISOString(),
-    records:records,incomeTags:customTags(),snapshots:snapshots},null,2),'application/json');
+    records:records,incomeTags:customTags(),snapshots:snapshots,channelSets:channelSets},null,2),'application/json');
   toast('备份已导出，请存到安全的地方');
 }
 function importJSON(file){
@@ -899,6 +1006,20 @@ function importJSON(file){
         });
         saveSnaps();
       }
+      if(d.channelSets){
+        SCOPES.forEach(function(sc){
+          if(!Array.isArray(d.channelSets[sc]))return;
+          var seen={};channelsFor(sc).forEach(function(c){seen[c.key]=1;});
+          d.channelSets[sc].forEach(function(c){
+            if(c&&c.key&&c.name&&!seen[c.key]){
+              channelsFor(sc).push({key:String(c.key).slice(0,40),name:String(c.name).slice(0,20),
+                color:(typeof c.color==='string'&&/^#[0-9a-fA-F]{6}$/.test(c.color))?c.color:'#868e96'});
+              seen[c.key]=1;
+            }
+          });
+        });
+        saveChannelSets();
+      }
       save();state.draftAccounts=null;state.draftCards=null;render();
       toast('导入完成：新增 '+n+' 条'+(dup?('，跳过重复 '+dup+' 条'):'')+(bad?('，忽略无效 '+bad+' 条'):''));
     }catch(e){toast('文件读不出来，请选择本工具导出的 JSON 备份');}
@@ -910,7 +1031,7 @@ $('prevMonth').addEventListener('click',function(){state.month=shiftMonth(state.
 $('nextMonth').addEventListener('click',function(){state.month=shiftMonth(state.month,1);render();});
 $('tabs').addEventListener('click',function(e){var b=e.target.closest('button[data-type]');if(!b)return;state.type=b.dataset.type;render();});
 $('modes').addEventListener('click',function(e){var b=e.target.closest('button[data-mode]');if(!b)return;state.mode=b.dataset.mode;render();});
-$('channelPanel').addEventListener('click',function(e){var b=e.target.closest('.ch-row');if(b)openSheet({channel:b.dataset.ch});});
+$('channelPanel').addEventListener('click',function(e){var b=e.target.closest('.ch-row[data-ch]');if(b)openSheet({channel:b.dataset.ch});});
 $('detailList').addEventListener('click',function(e){
   var demo=e.target.closest('[data-act="demo"]');if(demo){loadDemo();return;}
   var b=e.target.closest('.rec');if(b)openSheet({id:b.dataset.id,noFocus:true});
@@ -973,11 +1094,38 @@ $('impList').addEventListener('click',function(e){
   var b=e.target.closest('[data-imdel]');if(!b)return;
   state.wxRows.splice(Number(b.dataset.imdel),1);renderImport();
 });
+$('manageChannels').addEventListener('click',function(){openChSheet(state.type==='income'?'income':'expense');});
+$('manageAssets').addEventListener('click',function(){openChSheet('asset');});
+$('closeCh').addEventListener('click',closeChSheet);
+$('chOverlay').addEventListener('click',closeChSheet);
+$('chScopeTabs').addEventListener('click',function(e){
+  var b=e.target.closest('button[data-scope]');if(!b)return;
+  chState.scope=b.dataset.scope;chState.editing=null;chState.delKey=null;
+  $('chEditor').classList.add('hidden');$('chDelete').classList.add('hidden');$('chAdd').classList.remove('hidden');
+  renderChList();
+});
+$('chList').addEventListener('click',function(e){
+  var b=e.target.closest('button');if(!b||b.disabled)return;
+  if(b.dataset.chup!==undefined)moveCh(Number(b.dataset.chup),-1);
+  else if(b.dataset.chdown!==undefined)moveCh(Number(b.dataset.chdown),1);
+  else if(b.dataset.chedit!==undefined)openChEditor(Number(b.dataset.chedit));
+  else if(b.dataset.chdel!==undefined)openChDelete(Number(b.dataset.chdel));
+});
+$('chColors').addEventListener('click',function(e){
+  var b=e.target.closest('button[data-chcolor]');if(!b)return;
+  chState.color=b.dataset.chcolor;renderChColors();
+});
+$('chAdd').addEventListener('click',function(){openChEditor(null);});
+$('chCancel').addEventListener('click',function(){chState.editing=null;$('chEditor').classList.add('hidden');$('chAdd').classList.remove('hidden');});
+$('chSave').addEventListener('click',saveChEditor);
+$('chDelCancel').addEventListener('click',function(){chState.delKey=null;$('chDelete').classList.add('hidden');$('chAdd').classList.remove('hidden');});
+$('chDelConfirm').addEventListener('click',confirmChDelete);
 $('menuBtn').addEventListener('click',function(e){e.stopPropagation();$('menu').classList.toggle('hidden');});
 $('menu').addEventListener('click',function(e){
   var b=e.target.closest('button[data-act]');if(!b)return;
   var a=b.dataset.act;$('menu').classList.add('hidden');
-  if(a==='wx')$('wxFile').click();
+  if(a==='channels')openChSheet();
+  else if(a==='wx')$('wxFile').click();
   else if(a==='csv')exportCSV();
   else if(a==='json')exportJSON();
   else if(a==='import')$('importFile').click();
@@ -1005,6 +1153,105 @@ $('wxFile').addEventListener('change',function(e){
 });
 document.addEventListener('click',function(e){if(!e.target.closest('#menu')&&!e.target.closest('#menuBtn'))$('menu').classList.add('hidden');});
 
+var chState={scope:'expense',editing:null,color:'#1677ff',delKey:null};
+function renderChList(){
+  var scope=chState.scope,list=channelsFor(scope),tabs=$('chScopeTabs').children;
+  for(var i=0;i<tabs.length;i++)tabs[i].classList.toggle('on',tabs[i].dataset.scope===scope);
+  $('chList').innerHTML=list.map(function(c,i){
+    return '<div class="ch-manage-row">'+
+      '<span class="nm"><span class="dot" style="background:'+c.color+'"></span><span class="tx">'+esc(c.name)+'</span></span>'+
+      '<span class="ops">'+
+        '<button data-chup="'+i+'"'+(i===0?' disabled':'')+' aria-label="上移">↑</button>'+
+        '<button data-chdown="'+i+'"'+(i===list.length-1?' disabled':'')+' aria-label="下移">↓</button>'+
+        '<button data-chedit="'+i+'">改</button>'+
+        '<button class="del" data-chdel="'+i+'" aria-label="删除">✕</button>'+
+      '</span></div>';
+  }).join('');
+}
+function openChSheet(scope){
+  chState.scope=scope||(state.type==='asset'?'asset':state.type==='income'?'income':'expense');
+  chState.editing=null;chState.delKey=null;
+  $('chEditor').classList.add('hidden');$('chDelete').classList.add('hidden');$('chAdd').classList.remove('hidden');
+  renderChList();
+  $('chOverlay').classList.remove('hidden');$('chSheet').classList.remove('hidden');
+  requestAnimationFrame(function(){$('chSheet').classList.add('open');});
+}
+function closeChSheet(){
+  $('chSheet').classList.remove('open');$('chOverlay').classList.add('hidden');
+  setTimeout(function(){$('chSheet').classList.add('hidden');},220);
+}
+function renderChColors(){
+  $('chColors').innerHTML=CH_COLORS.map(function(col){
+    return '<button data-chcolor="'+col+'" class="'+(chState.color===col?'on':'')+'" style="background:'+col+'" aria-label="颜色"></button>';
+  }).join('');
+}
+function openChEditor(idx){
+  var list=channelsFor(chState.scope);
+  chState.editing=idx;
+  var c=idx===null?{name:'',color:CH_COLORS[list.length%CH_COLORS.length]}:list[idx];
+  $('chEditorTitle').textContent=idx===null?('添加'+(chState.scope==='asset'?'账户':'渠道')):('修改「'+c.name+'」');
+  $('chName').value=c.name;chState.color=c.color;
+  renderChColors();
+  $('chDelete').classList.add('hidden');$('chEditor').classList.remove('hidden');$('chAdd').classList.add('hidden');
+  setTimeout(function(){$('chName').focus();},120);
+}
+function saveChEditor(){
+  var name=$('chName').value.trim().slice(0,12);
+  if(!name){toast('请填名称');return;}
+  var list=channelsFor(chState.scope),wasNew=chState.editing===null;
+  if(list.some(function(c,i){return c.name===name&&i!==chState.editing;})){toast('这一处已经有同名渠道了');return;}
+  if(wasNew)list.push({key:'u_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:name,color:chState.color});
+  else{list[chState.editing].name=name;list[chState.editing].color=chState.color;}
+  saveChannelSets();chState.editing=null;
+  $('chEditor').classList.add('hidden');$('chAdd').classList.remove('hidden');
+  renderChList();render();toast(wasNew?'已添加渠道':'已保存修改');
+}
+function channelUsage(scope,key){
+  if(scope==='asset'){
+    var n=0;snapshots.forEach(function(s){if(Number(s.accounts&&s.accounts[key])>0)n++;});
+    return {n:n,text:n+' 次快照里有余额'};
+  }
+  var n2=records.filter(function(r){return r.type===scope&&r.channel===key;}).length;
+  return {n:n2,text:n2+' 笔记录'};
+}
+function openChDelete(idx){
+  var list=channelsFor(chState.scope),c=list[idx];
+  if(list.length<=1){toast('至少要保留一个渠道');return;}
+  chState.delKey=c.key;
+  var u=channelUsage(chState.scope,c.key);
+  $('chDelInfo').innerHTML='删除「<b>'+esc(c.name)+'</b>」'+
+    (u.n?('：有 '+u.text+'，会先转移到下面的'+(chState.scope==='asset'?'账户':'渠道')+'再删除。'):'：目前没有数据，可直接删除。');
+  $('chDelTarget').innerHTML=list.filter(function(x){return x.key!==c.key;}).map(function(x){
+    return '<option value="'+esc(x.key)+'">'+esc(x.name)+'</option>';}).join('');
+  $('chDelTarget').disabled=u.n===0;
+  $('chDelConfirm').textContent=u.n?'确认删除并转移':'确认删除';
+  $('chEditor').classList.add('hidden');$('chDelete').classList.remove('hidden');$('chAdd').classList.add('hidden');
+}
+function confirmChDelete(){
+  var scope=chState.scope,key=chState.delKey,list=channelsFor(scope);
+  if(!key||list.length<=1)return;
+  var target=$('chDelTarget').disabled?null:$('chDelTarget').value;
+  if(scope==='asset'){
+    if(target)snapshots.forEach(function(sn){
+      var v=Number(sn.accounts&&sn.accounts[key])||0;
+      if(v){sn.accounts[target]=(Number(sn.accounts[target])||0)+v;sn.accounts[key]=0;}
+    });
+    saveSnaps();state.draftAccounts=null;
+  }else{
+    if(target)records.forEach(function(r){if(r.type===scope&&r.channel===key)r.channel=target;});
+    save();
+  }
+  channelSets[scope]=list.filter(function(x){return x.key!==key;});
+  saveChannelSets();chState.delKey=null;
+  $('chDelete').classList.add('hidden');$('chAdd').classList.remove('hidden');
+  renderChList();render();toast(target?'已删除，数据已转移':'已删除');
+}
+function moveCh(idx,dir){
+  var list=channelsFor(chState.scope),j=idx+dir;
+  if(j<0||j>=list.length)return;
+  var t=list[idx];list[idx]=list[j];list[j]=t;
+  saveChannelSets();renderChList();render();
+}
 function loadDemo(){
   if(records.some(isDemo)){toast('示例数据已经在里面了');return;}
   records=records.concat(demoData());save();
