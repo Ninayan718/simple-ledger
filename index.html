@@ -326,7 +326,7 @@ button{cursor:pointer; touch-action:manipulation}
 
   <footer class="tips">
     <div><b>渠道之间互转不用记</b>（钱没进也没出，记了会虚增收支）；微信账单里的提现/还款会标成「不计收支」。</div>
-    <div>右上角 ··· 可导入微信账单 Excel（.xlsx）或 CSV、导出 CSV / JSON 备份；<b>记得定期备份</b>，清浏览器数据会丢。</div>
+    <div>右上角 ··· 可导入微信 / 支付宝账单（xlsx 或 CSV）、导出 CSV / JSON 备份；<b>记得定期备份</b>，清浏览器数据会丢。</div>
     <div>iPhone：Safari 分享 → 添加到主屏幕，就能当 App 用。</div>
   </footer>
 </div>
@@ -347,8 +347,8 @@ button{cursor:pointer; touch-action:manipulation}
 </div>
 
 <div class="overlay hidden" id="impOverlay"></div>
-<div class="imp-sheet hidden" id="impSheet" role="dialog" aria-label="微信账单导入预览">
-  <div class="sheet-head"><strong>微信账单导入预览</strong><button id="closeImp" aria-label="关闭">✕</button></div>
+<div class="imp-sheet hidden" id="impSheet" role="dialog" aria-label="账单导入预览">
+  <div class="sheet-head"><strong id="impTitle">账单导入预览</strong><button id="closeImp" aria-label="关闭">✕</button></div>
   <div class="imp-stat" id="impStat"></div>
   <div class="imp-tools">
     <label><input type="checkbox" id="impAll"> 全选</label>
@@ -393,7 +393,8 @@ button{cursor:pointer; touch-action:manipulation}
 </div>
 <div class="menu hidden" id="menu">
   <button data-act="channels">管理渠道 / 账户</button>
-  <button data-act="wx">导入微信账单（xlsx）</button>
+  <button data-act="wx">导入微信账单（xlsx / CSV）</button>
+  <button data-act="ali">导入支付宝账单（xlsx / CSV）</button>
   <button data-act="csv">导出 CSV（全部记录）</button>
   <button data-act="json">导出 JSON 备份</button>
   <button data-act="import">导入 JSON（合并去重）</button>
@@ -403,6 +404,7 @@ button{cursor:pointer; touch-action:manipulation}
 </div>
 <input type="file" id="importFile" accept=".json,application/json" hidden>
 <input type="file" id="wxFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
+<input type="file" id="aliFile" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -491,7 +493,7 @@ function normalize(r){
     amount:Math.round(amount*100)/100,
     tag:(typeof r.tag==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(r.tag))?r.tag:null,
     note:str(r.note,120),party:str(r.party,80),pay:str(r.pay,60),status:str(r.status,40),wxid:str(r.wxid,80),
-    src:(r.src==='daily'||r.src==='wechat')?r.src:'single',createdAt:Number(r.createdAt)||Date.now()};
+    src:(r.src==='daily'||r.src==='wechat'||r.src==='alipay')?r.src:'single',createdAt:Number(r.createdAt)||Date.now()};
 }
 
 var records=[],incomeTags=[],snapshots=[],storageOK=true;
@@ -533,7 +535,7 @@ loadTags();loadSnaps();loadChannelSets();load();
 
 var state={month:thisMonth(),type:'expense',mode:'single',editing:null,showNeutral:false,
   form:{type:'expense',channel:'alipay',tag:null,date:today()},
-  draftAccounts:null,draftCards:null,wxRows:[],report:{mode:'month',pick:''}};
+  draftAccounts:null,draftCards:null,wxRows:[],billSource:'wechat',report:{mode:'month',pick:''}};
 var quickNotes=[];
 
 function toast(msg){var t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(function(){t.classList.remove('show');},2600);}
@@ -1200,6 +1202,64 @@ function wxDate(v){
   }
   return s;
 }
+function findHeader(rows){
+  for(var i=0;i<Math.min(rows.length,60);i++){
+    var h=rows[i].map(normHead),line=h.join('|');
+    if(line.indexOf('收/支')>=0&&line.indexOf('金额')>=0)return {i:i,head:h};
+  }
+  return null;
+}
+function detectSource(rows){
+  var f=findHeader(rows);if(!f)return null;
+  var line=f.head.join('|');
+  if(/交易订单号|交易号|商品说明|商品名称|收\/付款方式|交易分类|成功退款|对方账号/.test(line))return 'alipay';
+  if(/交易单号|支付方式|当前状态/.test(line))return 'wechat';
+  return null;
+}
+function defaultAliChannel(){
+  var l=channelsFor('expense');
+  for(var i=0;i<l.length;i++)if(l[i].key==='alipay')return 'alipay';
+  return l[0]?l[0].key:'alipay';
+}
+function mapAli(rows){
+  var f=findHeader(rows);if(!f)return null;
+  var head=f.head,hi=f.i;
+  function col(name){for(var j=0;j<head.length;j++)if(head[j]===name)return j;return -1;}
+  function colLike(p){for(var j=0;j<head.length;j++)if(head[j].indexOf(p)===0)return j;return -1;}
+  function anyCol(names){for(var q=0;q<names.length;q++){var j=col(names[q]);if(j>=0)return j;}return -1;}
+  var t1=col('交易时间'),t2=col('付款时间'),t3=col('交易创建时间');
+  var ci={time:t1>=0?t1:(t2>=0?t2:t3),time2:(t1>=0||t2>=0)?t3:-1,
+    dir:colLike('收/支'),amt:col('金额(元)'),
+    wxid:anyCol(['交易订单号','交易号']),party:col('交易对方'),
+    goods:anyCol(['商品说明','商品名称','商品']),cat:anyCol(['交易分类','交易类型','类型']),
+    pay:anyCol(['收/付款方式','收付款方式','支付方式']),status:anyCol(['交易状态','当前状态']),
+    memo:col('备注'),refund:colLike('成功退款')};
+  if(ci.amt<0)ci.amt=colLike('金额');
+  if(ci.amt<0||ci.time<0||ci.dir<0)return null;
+  function cell(row,i){return i>=0&&i<row.length?String(row[i]).trim():'';}
+  var have={};records.forEach(function(r){if(r.wxid)have[r.wxid]=1;});
+  var seen={},out=[];
+  for(var k=hi+1;k<rows.length;k++){
+    var row=rows[k];if(!row||!row.length)continue;
+    var raw=cell(row,ci.time)||cell(row,ci.time2);
+    var ds=wxDate(raw).slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(ds))continue;
+    var c=toCents(cell(row,ci.amt));if(isNaN(c))continue;
+    var d=cell(row,ci.dir);
+    var type=d==='支出'?'expense':d==='收入'?'income':'neutral';
+    var wxid=cell(row,ci.wxid);
+    var dup=wxid?(!!have[wxid]||!!seen[wxid]):false;
+    if(wxid)seen[wxid]=1;
+    var note=[cell(row,ci.cat),cell(row,ci.goods),cell(row,ci.memo)].filter(Boolean).join(' · ').slice(0,120);
+    var status=cell(row,ci.status).slice(0,40);
+    var rf=toCents(cell(row,ci.refund));
+    if(!isNaN(rf)&&rf>0)status=(status?status+' · ':'')+'退款'+fmt(rf);
+    out.push({date:ds,type:type,amount:c,channel:defaultAliChannel(),tag:null,note:note,
+      party:cell(row,ci.party).slice(0,80),pay:cell(row,ci.pay).slice(0,60),
+      status:status,wxid:wxid,dup:dup,skip:dup,checked:false});
+  }
+  return out;
+}
 function mapWx(rows){
   var hi=-1;
   for(var i=0;i<Math.min(rows.length,50);i++){
@@ -1235,8 +1295,12 @@ function mapWx(rows){
   }
   return out;
 }
-function openImport(rows){
+function openImport(rows,source){
   state.wxRows=rows;
+  state.billSource=source||'wechat';
+  var label=state.billSource==='alipay'?'支付宝':'微信';
+  $('impTitle').textContent=label+'账单导入预览';
+  $('impSheet').setAttribute('aria-label',label+'账单导入预览');
   $('impBulkChannel').innerHTML=allChannels().map(function(c){return '<option value="'+esc(c.key)+'">'+esc(c.name)+'</option>';}).join('');
   renderImport();
   $('impOverlay').classList.remove('hidden');$('impSheet').classList.remove('hidden');
@@ -1252,9 +1316,10 @@ function renderImport(){
   var e=ok.filter(function(r){return r.type==='expense';}).length;
   var i=ok.filter(function(r){return r.type==='income';}).length;
   var n=ok.filter(function(r){return r.type==='neutral';}).length;
+  var label=state.billSource==='alipay'?'支付宝':'微信';
   $('impStat').innerHTML='文件共 <b>'+rows.length+'</b> 行，可导入 <b>'+ok.length+'</b> 条：支出 '+e+' / 收入 '+i+' / 不计收支 '+n+
     (dup?'<br>其中 '+dup+' 条交易单号已存在，自动跳过':'')+
-    '<br>默认全进「微信」，勾选可批量改渠道；中性记录不进合计。';
+    '<br>默认全进「'+label+'」，勾选可批量改渠道；中性记录不进合计。';
   $('impList').innerHTML=rows.length?rows.map(function(r,idx){
     var tname=typeName(r.type);
     var short=[r.note,r.party].filter(Boolean).join(' · ')||'（无说明）';
@@ -1269,7 +1334,7 @@ function renderImport(){
       '<span class="amt '+(r.type==='expense'?'exp':r.type==='income'?'inc':'')+'">'+fmt(r.amount)+'</span>'+
       '<select data-imch="'+idx+'"'+(r.skip?' disabled':'')+'>'+opts+'</select>'+
       '<button class="rm" data-imdel="'+idx+'" aria-label="移除">✕</button></div>';
-  }).join(''):'<div class="empty">没解析到交易记录，请确认是微信「用于个人对账」导出的 CSV</div>';
+  }).join(''):'<div class="empty">没解析到交易记录，请确认是'+label+'「用于个人对账」导出的账单</div>';
   $('impAll').checked=ok.length>0&&ok.every(function(r){return r.checked;});
 }
 function confirmImport(){
@@ -1278,7 +1343,7 @@ function confirmImport(){
   var added=0;
   rows.forEach(function(r){
     var rec=normalize({id:uid(),date:r.date,type:r.type,channel:r.channel,amount:r.amount/100,
-      tag:null,note:r.note,src:'wechat',wxid:r.wxid,party:r.party,pay:r.pay,status:r.status,createdAt:Date.now()});
+      tag:null,note:r.note,src:state.billSource==='alipay'?'alipay':'wechat',wxid:r.wxid,party:r.party,pay:r.pay,status:r.status,createdAt:Date.now()});
     if(rec){records.push(rec);added++;}
   });
   save();
@@ -1301,7 +1366,7 @@ function exportCSV(){
     var t=r.tag?tag(r.tag):null;
     rows.push([r.date,typeName(r.type),ch(r.channel,r.type==='income'?'income':'expense').name,(cents(r)/100).toFixed(2),
       t?t.name:'',r.note,r.party,r.pay,r.status,r.wxid,
-      r.src==='daily'?'日结合计':r.src==='wechat'?'微信导入':'逐笔']);
+      r.src==='daily'?'日结合计':r.src==='wechat'?'微信导入':r.src==='alipay'?'支付宝导入':'逐笔']);
   });
   download('账本-'+today()+'.csv','\uFEFF'+rows.map(function(row){return row.map(csvCell).join(',');}).join('\r\n'),'text/csv;charset=utf-8');
   toast('已导出 '+records.length+' 条记录');
@@ -1473,6 +1538,7 @@ $('menu').addEventListener('click',function(e){
   var a=b.dataset.act;$('menu').classList.add('hidden');
   if(a==='channels')openChSheet();
   else if(a==='wx')$('wxFile').click();
+  else if(a==='ali')$('aliFile').click();
   else if(a==='csv')exportCSV();
   else if(a==='json')exportJSON();
   else if(a==='import')$('importFile').click();
@@ -1486,26 +1552,28 @@ $('menu').addEventListener('click',function(e){
   }
 });
 $('importFile').addEventListener('change',function(e){var f=e.target.files[0];if(f)importJSON(f);e.target.value='';});
-$('wxFile').addEventListener('change',function(e){
-  var f=e.target.files[0];e.target.value='';
-  if(!f)return;
+function handleBill(f,expected){
   var fr=new FileReader();
   fr.onload=async function(){
     try{
       var buf=fr.result,u8=new Uint8Array(buf);
       var isZip=u8.length>4&&u8[0]===0x50&&u8[1]===0x4b;
-      var rows=isZip||/\.xlsx$/i.test(f.name)?
-        mapWx(await parseXlsx(buf)):mapWx(parseCSV(decodeCSV(buf)));
-      if(!rows){toast('没找到微信账单表头，请确认文件里有「交易时间 / 收/支 / 金额」这一行');return;}
-      openImport(rows);
+      var rows=isZip||/\.xlsx$/i.test(f.name)?await parseXlsx(buf):parseCSV(decodeCSV(buf));
+      var detected=detectSource(rows),source=detected||expected;
+      if(detected&&detected!==expected)toast('识别为'+(detected==='alipay'?'支付宝':'微信')+'账单，已按该格式解析');
+      var mapped=source==='alipay'?mapAli(rows):mapWx(rows);
+      if(!mapped){toast('没找到账单表头，请确认文件里有「收/支 / 金额 / 交易时间」这一行');return;}
+      openImport(mapped,source);
     }catch(err){
       var msg=String(err&&err.message||'');
-      toast('文件解析失败：'+(msg||'格式不符，请确认是微信账单'));
+      toast('文件解析失败：'+(msg||'格式不符，请确认是微信或支付宝账单'));
     }
   };
   fr.onerror=function(){toast('文件读取失败');};
   fr.readAsArrayBuffer(f);
-});
+}
+$('wxFile').addEventListener('change',function(e){var f=e.target.files[0];e.target.value='';if(f)handleBill(f,'wechat');});
+$('aliFile').addEventListener('change',function(e){var f=e.target.files[0];e.target.value='';if(f)handleBill(f,'alipay');});
 document.addEventListener('click',function(e){if(!e.target.closest('#menu')&&!e.target.closest('#menuBtn'))$('menu').classList.add('hidden');});
 
 var chState={scope:'expense',editing:null,color:'#1677ff',delKey:null};
