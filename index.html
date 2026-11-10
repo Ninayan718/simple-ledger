@@ -212,6 +212,24 @@ button{cursor:pointer; touch-action:manipulation}
 .ch-del-box{border:0.5px solid #f3c6c6;background:#fff7f7;border-radius:10px;padding:12px;margin:12px 0;font-size:13px;line-height:1.7}
 .ch-del-box select{width:100%;border:0.5px solid var(--bd2);background:var(--card);border-radius:8px;padding:8px;margin:8px 0}
 .modebar .mini-btn{flex:none}
+.report-panel{margin-bottom:18px}
+.report-card{padding:14px;margin-bottom:14px}
+.report-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.report-head select{border:0.5px solid var(--bd2);background:var(--bg);border-radius:8px;padding:6px 8px;font-size:13px;max-width:156px}
+.cmp-title{font-size:12px;color:var(--t2);margin-bottom:8px}
+.cmp-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.cmp-item{background:var(--bg);border-radius:9px;padding:9px 10px}
+.cmp-item .lb{font-size:11px;color:var(--t2)}
+.cmp-item .vl{font-size:13px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cmp-item .pc{font-size:11px;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-title{font-size:13px;font-weight:600;margin:16px 0 9px}
+.bk-title:first-child{margin-top:0}
+.trend-head{display:flex;align-items:center;gap:8px;padding:0 0 6px;font-size:11px;color:var(--t3)}
+.trend-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:0;border-top:0.5px solid var(--bd);padding:9px 0;font-size:12px}
+.trend-row.on .tp{color:var(--blue);font-weight:600}
+.tp{width:58px;flex:none;color:var(--t2);font-variant-numeric:tabular-nums}
+.tn{flex:1;text-align:right;font-variant-numeric:tabular-nums;min-width:0;white-space:nowrap}
+.tnet{width:76px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums;flex:none;white-space:nowrap}
 @media (min-width:560px){ .sheet{bottom:auto;top:50%;transform:translateY(-46%) scale(.98);border-radius:16px;opacity:0;pointer-events:none;max-height:86vh} .sheet.open{transform:translateY(-50%) scale(1);opacity:1;pointer-events:auto} .imp-sheet{bottom:auto;top:50%;transform:translateY(-46%) scale(.98);border-radius:16px;opacity:0;pointer-events:none} .imp-sheet.open{transform:translateY(-50%) scale(1);opacity:1;pointer-events:auto} }
 </style>
 </head>
@@ -244,6 +262,7 @@ button{cursor:pointer; touch-action:manipulation}
     <button data-type="expense" class="on">支出</button>
     <button data-type="income">收入</button>
     <button data-type="asset">资产</button>
+    <button data-type="report">统计</button>
   </div>
 
   <div class="modebar" id="modebar">
@@ -275,11 +294,26 @@ button{cursor:pointer; touch-action:manipulation}
       <div class="asset-date"><label>日期 <input type="date" id="snapDate"></label></div>
       <h3 class="asset-h3">账户余额 <button class="mini-btn" id="manageAssets">管理账户</button></h3>
       <div id="snapAccounts"></div>
-      <h3 class="asset-h3">信用卡欠款 <button class="mini-btn" id="addCard">＋ 添加信用卡</button></h3>
+      <h3 class="asset-h3">欠款 <button class="mini-btn" id="addCard">＋ 添加欠款</button></h3>
       <div id="snapCards"></div>
       <button class="primary" id="saveSnap">保存这次快照</button>
     </div>
     <div class="card snap-history" id="snapHistory"></div>
+  </section>
+
+  <section class="report-panel hidden" id="reportPanel">
+    <div class="card report-card">
+      <div class="report-head">
+        <div class="segmented" id="reportModes">
+          <button data-rmode="month" class="on">按月</button>
+          <button data-rmode="year">按年</button>
+        </div>
+        <select id="reportPick" aria-label="选择期间"></select>
+      </div>
+      <div id="reportCompare"></div>
+    </div>
+    <div class="card report-card" id="reportBreakdown"></div>
+    <div class="card report-card" id="reportTrend"></div>
   </section>
 
   <section class="card tagcard hidden" id="tagPanel"></section>
@@ -490,7 +524,7 @@ function loadSnaps(){
   try{var raw=localStorage.getItem(SNAPKEY);var arr=raw?JSON.parse(raw):[];
     snapshots=Array.isArray(arr)?arr.filter(function(s){return s&&s.accounts;}).map(function(s){
       return {id:String(s.id||uid()),date:s.date||today(),accounts:s.accounts||{},
-        cards:Array.isArray(s.cards)?s.cards.map(function(c){return {id:String(c.id||uid()),name:String(c.name||'信用卡'),owe:Number(c.owe)||0};}):[]};
+        cards:Array.isArray(s.cards)?s.cards.map(function(c){return {id:String(c.id||uid()),name:String(c.name||'欠款'),owe:Number(c.owe)||0};}):[]};
     }):[];
   }catch(e){snapshots=[];}
 }
@@ -499,7 +533,7 @@ loadTags();loadSnaps();loadChannelSets();load();
 
 var state={month:thisMonth(),type:'expense',mode:'single',editing:null,showNeutral:false,
   form:{type:'expense',channel:'alipay',tag:null,date:today()},
-  draftAccounts:null,draftCards:null,wxRows:[]};
+  draftAccounts:null,draftCards:null,wxRows:[],report:{mode:'month',pick:''}};
 var quickNotes=[];
 
 function toast(msg){var t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(function(){t.classList.remove('show');},2600);}
@@ -532,28 +566,144 @@ function demoSnap(){
   return {id:'demo-snap',date:today(),accounts:a,cards:[{id:'demo-card',name:'中信信用卡',owe:236000}]};
 }
 
+function reportPeriods(){
+  var set={};
+  records.forEach(function(r){
+    if(r.type==='neutral')return;
+    set[state.report.mode==='month'?r.date.slice(0,7):r.date.slice(0,4)]=1;
+  });
+  return Object.keys(set).sort().reverse();
+}
+function periodLabel(p){
+  if(!p)return '—';
+  if(state.report.mode==='month'){var a=p.split('-');return a[0]+' 年 '+Number(a[1])+' 月';}
+  return p+' 年';
+}
+function reportRecords(p){
+  if(!p)return [];
+  return records.filter(function(r){
+    return r.type!=='neutral'&&(state.report.mode==='month'?r.date.slice(0,7)===p:r.date.slice(0,4)===p);
+  });
+}
+function reportTotals(list){
+  var i=sum(list.filter(function(r){return r.type==='income';}));
+  var e=sum(list.filter(function(r){return r.type==='expense';}));
+  return {inc:i,exp:e,net:i-e};
+}
+function prevPeriod(p){
+  if(!p)return '';
+  return state.report.mode==='month'?shiftMonth(p,-1):String(Number(p)-1);
+}
+function deltaHTML(label,cur,prev,goodUp){
+  var d=cur-prev,sign=d>0?'+':d<0?'-':'';
+  var cls=d===0?'':((d>0)===goodUp?'inc':'exp');
+  var pct=prev>0?((d>=0?'+':'')+(d/prev*100).toFixed(1)+'%'):'';
+  return '<div class="cmp-item"><div class="lb">'+label+'</div>'+
+    '<div class="vl '+cls+'">'+(d===0?'持平':sign+fmt(Math.abs(d)))+'</div>'+
+    '<div class="pc">'+(prev>0?pct+' 较上期':'上期无记录')+'</div></div>';
+}
+function compareHTML(cur,prev,hasPrev){
+  var label='较上'+(state.report.mode==='month'?'月':'年');
+  if(!hasPrev)return '<div class="cmp-title">'+label+'：上期没有记录，暂无对比</div>';
+  return '<div class="cmp-title">'+label+'变化</div><div class="cmp-grid">'+
+    deltaHTML('收入',cur.inc,prev.inc,true)+
+    deltaHTML('支出',cur.exp,prev.exp,false)+
+    deltaHTML('结余',cur.net,prev.net,true)+'</div>';
+}
+function tagPool(tags){return tags.map(function(t){return {key:t.key,name:t.name,color:'#2563eb'};});}
+function bkSection(title,list,total,pool,field){
+  var rows=[],used={};
+  pool.forEach(function(c){
+    used[c.key]=1;
+    var v=sum(list.filter(function(r){return r[field]===c.key;}));
+    if(v>0)rows.push({name:c.name,v:v,color:c.color||'#2563eb'});
+  });
+  var other=sum(list.filter(function(r){return !r[field]||!used[r[field]];}));
+  if(other>0)rows.push({name:'未分类',v:other,color:'#c8ccd4'});
+  rows.sort(function(a,b){return b.v-a.v;});
+  var h='<div class="bk-title">'+title+'</div>';
+  if(!rows.length)return h+'<div class="hint" style="text-align:left;padding:4px 0 10px">暂无数据</div>';
+  rows.forEach(function(r){
+    var w=total>0?Math.min(100,r.v/total*100):0;
+    h+='<div class="tag-row"><span class="nm" title="'+esc(r.name)+'">'+esc(r.name)+'</span>'+
+      '<span class="track"><i style="width:'+w.toFixed(1)+'%;background:'+r.color+'"></i></span>'+
+      '<span class="vl">'+fmt(r.v)+'</span></div>';
+  });
+  return h;
+}
+function breakdownHTML(list){
+  var e=list.filter(function(r){return r.type==='expense';}),i=list.filter(function(r){return r.type==='income';});
+  return bkSection('支出 · 按渠道',e,sum(e),channelsFor('expense'),'channel')+
+    bkSection('支出 · 按分类',e,sum(e),tagPool(TAGS),'tag')+
+    bkSection('收入 · 按渠道',i,sum(i),channelsFor('income'),'channel')+
+    bkSection('收入 · 按分类',i,sum(i),tagPool(incomeTags),'tag')+
+    '<div class="hint" style="text-align:left;padding-top:8px">未分类含未打标签及已移除渠道的记录；不计收支不参与统计。</div>';
+}
+function trendHTML(ps,pick){
+  var h='<div class="bk-title">'+(state.report.mode==='month'?'月度汇总（近 12 期）':'年度汇总')+'</div>';
+  if(!ps.length)return h+'<div class="empty" style="padding:16px">还没有收支记录，先去记一笔吧</div>';
+  var shown=state.report.mode==='month'?ps.slice(0,12):ps;
+  h+='<div class="trend-head"><span class="tp">期间</span><span class="tn i">收入</span><span class="tn e">支出</span><span class="tnet">结余</span></div>';
+  shown.forEach(function(p){
+    var t=reportTotals(reportRecords(p));
+    h+='<button class="trend-row'+(p===pick?' on':'')+'" data-period="'+esc(p)+'">'+
+      '<span class="tp">'+esc(state.report.mode==='month'?p.slice(2).replace('-','/'):p)+'</span>'+
+      '<span class="tn i">'+fmt(t.inc)+'</span><span class="tn e">'+fmt(t.exp)+'</span>'+
+      '<span class="tnet '+(t.net<0?'exp':'')+'">'+fmt(t.net)+'</span></button>';
+  });
+  if(state.report.mode==='month'&&ps.length>12)h+='<div class="hint" style="text-align:left;padding-top:8px">仅显示最近 12 期，全部数据可导出备份查看</div>';
+  return h;
+}
+function renderReport(){
+  var ps=reportPeriods(),mb=$('reportModes').children;
+  for(var j=0;j<mb.length;j++)mb[j].classList.toggle('on',mb[j].dataset.rmode===state.report.mode);
+  if(!ps.length){
+    state.report.pick='';
+    $('reportPick').innerHTML='<option>暂无数据</option>';
+    $('reportCompare').innerHTML='';
+    $('reportBreakdown').innerHTML='<div class="empty" style="padding:18px">还没有收支记录</div>';
+    $('reportTrend').innerHTML=trendHTML(ps,'');
+    return;
+  }
+  if(ps.indexOf(state.report.pick)<0)state.report.pick=ps[0];
+  var pick=state.report.pick;
+  $('reportPick').innerHTML=ps.map(function(p){
+    return '<option value="'+esc(p)+'"'+(p===pick?' selected':'')+'>'+esc(periodLabel(p))+'</option>';}).join('');
+  var list=reportRecords(pick),prevList=reportRecords(prevPeriod(pick));
+  $('reportCompare').innerHTML=compareHTML(reportTotals(list),reportTotals(prevList),prevList.length>0);
+  $('reportBreakdown').innerHTML=breakdownHTML(list);
+  $('reportTrend').innerHTML=trendHTML(ps,pick);
+}
 function render(){
-  var isAsset=state.type==='asset';
+  var isAsset=state.type==='asset',isReport=state.type==='report';
+  if(isReport)renderReport();
   var mr=monthRecords();
   var neutral=mr.filter(function(r){return r.type==='neutral';});
   var inc=sum(mr.filter(function(r){return r.type==='income';}));
   var exp=sum(mr.filter(function(r){return r.type==='expense';}));
 
-  $('monthLabel').textContent=isAsset?'资产负债':monthLabel(state.month);
+  $('monthLabel').textContent=isAsset?'资产负债':isReport?'收支汇总':monthLabel(state.month);
   $('monthSub').textContent=isAsset?('共 '+snapshots.length+' 次快照'):
+    isReport?(state.report.mode==='month'?'按月汇总 · 对比与构成':'按年汇总 · 对比与构成'):
     ('本月共 '+(mr.length-neutral.length)+' 笔记录'+(neutral.length?'，'+neutral.length+' 笔不计收支':''));
-  $('prevMonth').style.visibility=isAsset?'hidden':'visible';
-  $('nextMonth').style.visibility=isAsset?'hidden':'visible';
+  $('prevMonth').style.visibility=(isAsset||isReport)?'hidden':'visible';
+  $('nextMonth').style.visibility=(isAsset||isReport)?'hidden':'visible';
 
   var tb=$('tabs').children;
   for(var i=0;i<tb.length;i++)tb[i].classList.toggle('on',tb[i].dataset.type===state.type);
 
   if(isAsset){
     var last=latestSnap(),a=accTotal(last),o=oweTotal(last);
-    $('labIncome').textContent='账户余额';$('labExpense').textContent='信用卡欠款';$('labBalance').textContent='净资产';
+    $('labIncome').textContent='账户余额';$('labExpense').textContent='欠款';$('labBalance').textContent='净资产';
     $('totalIncome').textContent=fmt(a);$('totalIncome').className='num inc';
     $('totalExpense').textContent=fmt(o);$('totalExpense').className='num exp';
     $('balance').textContent=fmt(a-o);$('balance').className='num'+(a-o<0?' exp':'');
+  }else if(isReport){
+    var rp=reportTotals(reportRecords(state.report.pick));
+    $('labIncome').textContent='收入';$('labExpense').textContent='支出';$('labBalance').textContent='结余';
+    $('totalIncome').textContent=fmt(rp.inc);$('totalIncome').className='num inc';
+    $('totalExpense').textContent=fmt(rp.exp);$('totalExpense').className='num exp';
+    $('balance').textContent=fmt(rp.net);$('balance').className='num'+(rp.net<0?' exp':'');
   }else{
     $('labIncome').textContent='收入';$('labExpense').textContent='支出';$('labBalance').textContent='结余';
     $('totalIncome').textContent=fmt(inc);$('totalIncome').className='num inc';
@@ -561,10 +711,13 @@ function render(){
     $('balance').textContent=fmt(inc-exp);$('balance').className='num'+(inc-exp<0?' exp':'');
   }
 
-  ['modebar','channelPanel','dailyPanel','tagPanel','details'].forEach(function(id){$(id).classList.toggle('hidden',isAsset);});
+  var hideMain=isAsset||isReport;
+  ['modebar','channelPanel','dailyPanel','tagPanel','details'].forEach(function(id){$(id).classList.toggle('hidden',hideMain);});
   $('assetPanel').classList.toggle('hidden',!isAsset);
+  $('reportPanel').classList.toggle('hidden',!isReport);
   $('demoBanner').classList.toggle('hidden',!records.some(isDemo));
   if(isAsset){renderAssets();return;}
+  if(isReport)return;
 
   var mb=$('modes').children;
   for(var j=0;j<mb.length;j++)mb[j].classList.toggle('on',mb[j].dataset.mode===state.mode);
@@ -630,10 +783,10 @@ function renderAssets(){
       '<input type="text" inputmode="decimal" placeholder="0" data-acc="'+c.key+'" value="'+esc(state.draftAccounts[c.key])+'" autocomplete="off"></div>';
   }).join('');
   $('snapCards').innerHTML=state.draftCards.length?state.draftCards.map(function(c,i){
-    return '<div class="asset-row"><input class="wname" type="text" placeholder="卡片名称" data-cname="'+i+'" value="'+esc(c.name)+'">'+
+    return '<div class="asset-row"><input class="wname" type="text" placeholder="欠款名称" data-cname="'+i+'" value="'+esc(c.name)+'">'+
       '<input type="text" inputmode="decimal" placeholder="欠款" data-cowe="'+i+'" value="'+esc(c.owe)+'" autocomplete="off">'+
       '<button class="rm" data-crm="'+i+'" aria-label="删除">✕</button></div>';
-  }).join(''):'<div class="hint" style="text-align:left;padding:6px 0">还没有信用卡，点右上角添加</div>';
+  }).join(''):'<div class="hint" style="text-align:left;padding:6px 0">还没有欠款，点右上角添加</div>';
 
   var list=sortedSnaps();
   var h='<h2>历史快照</h2>';
@@ -659,7 +812,7 @@ function collectAssetInputs(){
     if(o)card.owe=o.value;
   });
   return {accounts:acc,cards:state.draftCards.filter(function(c){return c.name||money0(c.owe)>0;}).map(function(c){
-    return {id:c.id,name:c.name||'信用卡',owe:money0(c.owe)};})};
+    return {id:c.id,name:c.name||'欠款',owe:money0(c.owe)};})};
 }
 function saveSnap(){
   var d=collectAssetInputs();
@@ -1221,6 +1374,15 @@ $('detailList').addEventListener('click',function(e){
   var demo=e.target.closest('[data-act="demo"]');if(demo){loadDemo();return;}
   var b=e.target.closest('.rec');if(b)openSheet({id:b.dataset.id,noFocus:true});
 });
+$('reportModes').addEventListener('click',function(e){
+  var b=e.target.closest('button[data-rmode]');if(!b)return;
+  state.report.mode=b.dataset.rmode;state.report.pick='';render();
+});
+$('reportPick').addEventListener('change',function(e){state.report.pick=e.target.value;render();});
+$('reportTrend').addEventListener('click',function(e){
+  var b=e.target.closest('[data-period]');if(!b)return;
+  state.report.pick=b.dataset.period;render();
+});
 $('toggleNeutral').addEventListener('click',function(){state.showNeutral=!state.showNeutral;render();});
 $('dailyDate').addEventListener('change',renderDaily);
 $('saveDaily').addEventListener('click',saveDaily);
@@ -1462,7 +1624,7 @@ window.addEventListener('storage',function(e){if(e.key===KEY){load();render();}}
 var _q=new URLSearchParams(location.search);
 if(_q.get('demo')==='1'&&!localStorage.getItem(KEY)){records=demoData();save();snapshots=[demoSnap()];saveSnaps();}
 if(_q.get('mode')==='daily')state.mode='daily';
-if(_q.get('type')==='income'||_q.get('type')==='asset')state.type=_q.get('type');
+if(_q.get('type')==='income'||_q.get('type')==='asset'||_q.get('type')==='report')state.type=_q.get('type');
 $('dailyDate').value=today();
 render();
 if(!storageOK)toast('浏览器不允许本地存储，请用导出功能保存数据');
