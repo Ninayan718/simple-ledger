@@ -100,7 +100,8 @@ button{cursor:pointer; touch-action:manipulation}
 
 .details{padding:14px 0 6px;margin-bottom:16px}
 .details .section-head{padding:0 14px;margin-bottom:6px}
-.detail-tools{padding:0 14px 8px}
+.detail-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 14px 8px}
+.detail-tools select{border:0.5px solid var(--bd2);background:var(--card);border-radius:7px;padding:5px 8px;font-size:12px;max-width:150px}
 .mini-btn{background:var(--card);border:0.5px solid var(--bd2);color:var(--blue);border-radius:7px;padding:4px 9px;font-size:12px}
 .mini-btn.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 .rec{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:none;border:0;border-top:0.5px solid var(--bd);padding:10px 14px}
@@ -320,7 +321,7 @@ button{cursor:pointer; touch-action:manipulation}
 
   <section class="card details" id="details">
     <div class="section-head"><h2 id="detailTitle">明细</h2><span id="detailCount"></span></div>
-    <div class="detail-tools hidden" id="detailTools"><button class="mini-btn" id="toggleNeutral">显示不计收支 (0)</button></div>
+    <div class="detail-tools" id="detailTools"><select id="detailChannel" aria-label="按渠道筛选明细"></select><button class="mini-btn hidden" id="toggleNeutral">显示不计收支 (0)</button></div>
     <div id="detailList"></div>
   </section>
 
@@ -535,7 +536,7 @@ loadTags();loadSnaps();loadChannelSets();load();
 
 var state={month:thisMonth(),type:'expense',mode:'single',editing:null,showNeutral:false,
   form:{type:'expense',channel:'alipay',tag:null,date:today()},
-  draftAccounts:null,draftCards:null,wxRows:[],billSource:'wechat',report:{mode:'month',pick:''}};
+  draftAccounts:null,draftCards:null,wxRows:[],billSource:'wechat',detailChannel:'',report:{mode:'month',pick:''}};
 var quickNotes=[];
 
 function toast(msg){var t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(function(){t.classList.remove('show');},2600);}
@@ -855,17 +856,39 @@ function renderTags(dir,total){
 }
 
 function renderDetails(dir,neutral){
-  $('detailTitle').textContent=monthLabel(state.month)+' · '+(state.type==='expense'?'支出':'收入')+'明细';
-  $('detailCount').textContent=dir.length+' 笔 / 合计 '+fmt(sum(dir));
-  $('detailTools').classList.toggle('hidden',neutral.length===0);
+  var scope=state.type==='income'?'income':'expense';
+  var pool=channelsFor(scope),known={};
+  pool.forEach(function(c){known[c.key]=1;});
+  var orphanN=dir.concat(neutral).filter(function(r){return !known[r.channel];}).length;
+  var opts=['<option value="">全部渠道</option>'].concat(pool.map(function(c){
+    return '<option value="'+esc(c.key)+'">'+esc(c.name)+'</option>';}));
+  if(orphanN)opts.push('<option value="__orphan__">已移除渠道</option>');
+  if(state.detailChannel&&state.detailChannel!=='__orphan__'&&!known[state.detailChannel])state.detailChannel='';
+  if(state.detailChannel==='__orphan__'&&!orphanN)state.detailChannel='';
+  var sel=$('detailChannel');
+  sel.innerHTML=opts.join('');
+  sel.value=state.detailChannel;
+  $('detailTools').classList.remove('hidden');
+  var chLabel=state.detailChannel==='__orphan__'?'已移除渠道':(state.detailChannel?ch(state.detailChannel,scope).name:'');
+  $('detailTitle').textContent=monthLabel(state.month)+' · '+(scope==='income'?'收入':'支出')+'明细'+(chLabel?' · '+chLabel:'');
+  function flt(r){
+    if(!state.detailChannel)return true;
+    if(state.detailChannel==='__orphan__')return !known[r.channel];
+    return r.channel===state.detailChannel;
+  }
+  var shownDir=dir.filter(flt),shownNeutral=neutral.filter(flt);
+  $('detailCount').textContent=shownDir.length+' 笔 / 合计 '+fmt(sum(shownDir));
   var btn=$('toggleNeutral');
-  btn.textContent=(state.showNeutral?'隐藏':'显示')+'不计收支 ('+neutral.length+')';
+  btn.classList.toggle('hidden',shownNeutral.length===0);
+  btn.textContent=(state.showNeutral?'隐藏':'显示')+'不计收支 ('+shownNeutral.length+')';
   btn.classList.toggle('on',state.showNeutral);
-  var list=dir.slice();
-  if(state.showNeutral)list=list.concat(neutral);
+  var list=shownDir.slice();
+  if(state.showNeutral)list=list.concat(shownNeutral);
   if(list.length===0){
-    $('detailList').innerHTML='<div class="empty"><div class="big">这个月还没有记录</div>'+
-      '点上面的渠道格子记第一笔，或<br><button class="linkbtn" data-act="demo">载入示例数据看看</button></div>';
+    var big=state.detailChannel?'该渠道这个月没有记录':'这个月还没有记录';
+    var act=state.detailChannel?'<button class="linkbtn" data-act="clearfilter">显示全部渠道</button>':
+      '点上面的渠道格子记第一笔，或<br><button class="linkbtn" data-act="demo">载入示例数据看看</button>';
+    $('detailList').innerHTML='<div class="empty"><div class="big">'+big+'</div>'+act+'</div>';
     return;
   }
   var sorted=list.slice().sort(function(a,b){return b.date.localeCompare(a.date)||b.createdAt-a.createdAt;});
@@ -1348,7 +1371,7 @@ function confirmImport(){
   });
   save();
   var neut=rows.filter(function(r){return r.type==='neutral';}).length;
-  closeImport();state.month=rows[0].date.slice(0,7);state.type='expense';state.showNeutral=false;render();
+  closeImport();state.month=rows[0].date.slice(0,7);state.type='expense';state.showNeutral=false;state.detailChannel='';render();
   toast('已导入 '+added+' 条'+(neut?'（'+neut+' 条不计收支，可在明细里打开查看）':''));
 }
 
@@ -1432,10 +1455,11 @@ function importJSON(file){
 
 $('prevMonth').addEventListener('click',function(){state.month=shiftMonth(state.month,-1);render();});
 $('nextMonth').addEventListener('click',function(){state.month=shiftMonth(state.month,1);render();});
-$('tabs').addEventListener('click',function(e){var b=e.target.closest('button[data-type]');if(!b)return;state.type=b.dataset.type;render();});
+$('tabs').addEventListener('click',function(e){var b=e.target.closest('button[data-type]');if(!b)return;if(state.type!==b.dataset.type)state.detailChannel='';state.type=b.dataset.type;render();});
 $('modes').addEventListener('click',function(e){var b=e.target.closest('button[data-mode]');if(!b)return;state.mode=b.dataset.mode;render();});
 $('channelPanel').addEventListener('click',function(e){var b=e.target.closest('.ch-row[data-ch]');if(b)openSheet({channel:b.dataset.ch});});
 $('detailList').addEventListener('click',function(e){
+  var clear=e.target.closest('[data-act="clearfilter"]');if(clear){state.detailChannel='';render();return;}
   var demo=e.target.closest('[data-act="demo"]');if(demo){loadDemo();return;}
   var b=e.target.closest('.rec');if(b)openSheet({id:b.dataset.id,noFocus:true});
 });
@@ -1448,6 +1472,7 @@ $('reportTrend').addEventListener('click',function(e){
   var b=e.target.closest('[data-period]');if(!b)return;
   state.report.pick=b.dataset.period;render();
 });
+$('detailChannel').addEventListener('change',function(e){state.detailChannel=e.target.value;render();});
 $('toggleNeutral').addEventListener('click',function(){state.showNeutral=!state.showNeutral;render();});
 $('dailyDate').addEventListener('change',renderDaily);
 $('saveDaily').addEventListener('click',saveDaily);
